@@ -24,10 +24,11 @@ with app.app_context():
 
     db.session.commit()
 
-    # Create blank backup for restore
+    # Create blank backup for restore on first initialization.
     db_path = os.path.join(db_dir, 'drink_pool.db')
     blank_path = os.path.join(db_dir, 'drink_pool_blank.db')
-    shutil.copy2(db_path, blank_path)
+    if not os.path.exists(blank_path):
+        shutil.copy2(db_path, blank_path)
 
     print('Database initialized: db/drink_pool.db')
-    print('Blank backup created: db/drink_pool_blank.db')
+    print('Blank backup available: db/drink_pool_blank.db')
