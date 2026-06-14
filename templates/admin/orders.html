@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}訂單明細 - {{ session.title }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="mb-0"><i class="bi bi-list-ul"></i> {{ session.title }}</h3>
+        <small class="text-muted">
+            {{ session.start_time.strftime('%Y/%m/%d %H:%M') }} ~ {{ session.end_time.strftime('%Y/%m/%d %H:%M') }}
+        </small>
+    </div>
+    <div>
+        <a href="{{ url_for('admin_session_export', session_id=session.id) }}" class="btn btn-success me-2">
+            <i class="bi bi-file-earmark-excel"></i> 匯出 Excel
+        </a>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回後台
+        </a>
+    </div>
+</div>
+
+<div class="card shadow">
+    <div class="card-body">
+        {% if orders %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>#</th>
+                        <th>姓名</th>
+                        <th>科別</th>
+                        <th>品項</th>
+                        <th>甜度</th>
+                        <th>冰塊</th>
+                        <th>加料</th>
+                        <th>備註</th>
+                        <th>時間</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ order.name }}</td>
+                        <td>{{ order.department.name if order.department else '' }}</td>
+                        <td>{{ order.drink_item }}</td>
+                        <td>{{ order.sweetness }}</td>
+                        <td>{{ order.ice }}</td>
+                        <td>
+                            {% if order.addons %}
+                            {{ order.addons|sort(attribute='sort_order')|map(attribute='addon_name')|join('、') }}
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ order.notes or '—' }}</td>
+                        <td><small>{{ order.created_at.strftime('%m/%d %H:%M') }}</small></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="text-end mt-2">
+            <span class="badge bg-info fs-6">共 {{ orders|length }} 筆訂單</span>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+            <i class="bi bi-inbox" style="font-size:3rem;"></i>
+            <p class="mt-2">此場次尚無任何訂單</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

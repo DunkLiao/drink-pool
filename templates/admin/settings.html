@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}網站設定{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="mb-0"><i class="bi bi-gear"></i> 網站設定</h3>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回後台
+    </a>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">介面文字設定</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.site_title.label(class="form-label") }}
+                        {{ form.site_title(class="form-control" + (" is-invalid" if form.site_title.errors else "")) }}
+                        <small class="text-muted">顯示於瀏覽器標題列及頁面標題</small>
+                        {% for error in form.site_title.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.site_subtitle.label(class="form-label") }}
+                        {{ form.site_subtitle(class="form-control" + (" is-invalid" if form.site_subtitle.errors else "")) }}
+                        <small class="text-muted">顯示於頁面底部</small>
+                        {% for error in form.site_subtitle.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.org_name.label(class="form-label") }}
+                        {{ form.org_name(class="form-control" + (" is-invalid" if form.org_name.errors else "")) }}
+                        {% for error in form.org_name.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.org_dept.label(class="form-label") }}
+                        {{ form.org_dept(class="form-control" + (" is-invalid" if form.org_dept.errors else "")) }}
+                        {% for error in form.org_dept.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="d-grid">
+                        {{ form.submit(class="btn btn-primary") }}
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow mt-4">
+            <div class="card-header">預覽</div>
+            <div class="card-body">
+                <p class="mb-1"><strong>瀏覽器標題：</strong><span class="text-muted">[頁面名稱] - {{ form.org_name.data or config.DEFAULT_SETTINGS.org_name }}{{ form.org_dept.data or config.DEFAULT_SETTINGS.org_dept }}</span></p>
+                <p class="mb-0"><strong>頁腳顯示：</strong><span class="text-muted">{{ form.site_subtitle.data or config.DEFAULT_SETTINGS.site_subtitle }}</span></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}管理科別{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="mb-0"><i class="bi bi-building"></i> 管理科別</h3>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回後台
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-5">
+        <div class="card shadow">
+            <div class="card-header">新增科別</div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else ""), placeholder="例如：信用風險") }}
+                        {% for error in form.name.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {{ form.submit(class="btn btn-primary") }}
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="card shadow">
+            <div class="card-header">科別列表</div>
+            <ul class="list-group list-group-flush">
+                {% if departments %}
+                {% for dept in departments %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>{{ dept.name }}</span>
+                    <div class="btn-group btn-group-sm">
+                        <form method="POST" action="{{ url_for('admin_department_sort', dept_id=dept.id) }}" class="d-inline">
+                            <input type="hidden" name="direction" value="up">
+                            <button class="btn btn-outline-secondary" title="上移" {{ 'disabled' if loop.first }}>
+                                <i class="bi bi-arrow-up"></i>
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_department_sort', dept_id=dept.id) }}" class="d-inline">
+                            <input type="hidden" name="direction" value="down">
+                            <button class="btn btn-outline-secondary" title="下移" {{ 'disabled' if loop.last }}>
+                                <i class="bi bi-arrow-down"></i>
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_department_delete', dept_id=dept.id) }}"
+                              onsubmit="return confirm('確定要刪除「{{ dept.name }}」嗎？');" class="d-inline">
+                            <button class="btn btn-outline-danger">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </li>
+                {% endfor %}
+                {% else %}
+                <li class="list-group-item text-center text-muted">尚無科別，請先新增</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

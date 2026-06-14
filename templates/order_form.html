@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}飲料團購報名表{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="bi bi-cup-hot"></i> {{ session.title }}</h4>
+                <small>{{ session.start_time.strftime('%Y/%m/%d %H:%M') }} ~ {{ session.end_time.strftime('%Y/%m/%d %H:%M') }}</small>
+            </div>
+
+            {% if session.photo_path %}
+            <div class="text-center p-3 bg-light border-bottom">
+                <img src="{{ url_for('static', filename='uploads/photos/' + session.photo_path) }}"
+                     class="img-fluid rounded" alt="訂單照片" style="max-height:400px;cursor:zoom-in;"
+                     data-bs-toggle="modal" data-bs-target="#photoModal">
+                <p class="text-muted small mt-1 mb-0">訂單照片參考（點擊放大）</p>
+            </div>
+            {% endif %}
+
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else ""), placeholder="請輸入姓名") }}
+                        {% for error in form.name.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.department.label(class="form-label") }}
+                        {{ form.department(class="form-select" + (" is-invalid" if form.department.errors else "")) }}
+                        {% for error in form.department.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.drink_item.label(class="form-label") }}
+                        {{ form.drink_item(class="form-control" + (" is-invalid" if form.drink_item.errors else ""), placeholder="例如：珍珠奶茶、四季春青茶") }}
+                        {% for error in form.drink_item.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.sweetness.label(class="form-label") }}
+                            {{ form.sweetness(class="form-select" + (" is-invalid" if form.sweetness.errors else "")) }}
+                            {% for error in form.sweetness.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.ice.label(class="form-label") }}
+                            {{ form.ice(class="form-select" + (" is-invalid" if form.ice.errors else "")) }}
+                            {% for error in form.ice.errors %}
+                            <div class="invalid-feedback">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">加料 <small class="text-muted">（選填，最多5項）</small></label>
+                        <div id="addon-container">
+                            <div class="addon-row input-group mb-2">
+                                <input type="text" name="addons" class="form-control" placeholder="例如：珍珠、椰果">
+                                <button type="button" class="btn btn-outline-danger btn-remove-addon d-none" title="移除">
+                                    <i class="bi bi-dash-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" id="btn-add-addon" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-plus-lg"></i> 新增加料
+                        </button>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.notes.label(class="form-label") }}
+                        {{ form.notes(class="form-control", rows=2, placeholder="例如：去珍珠、改燕麥奶、杯蓋需求等") }}
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        {{ form.submit(class="btn btn-primary btn-lg") }}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if session.photo_path %}
+<div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content bg-dark">
+            <div class="modal-header border-0">
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center p-4">
+                <img src="{{ url_for('static', filename='uploads/photos/' + session.photo_path) }}"
+                     class="img-fluid" alt="訂單照片（完整大小）">
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const container = document.getElementById('addon-container');
+    const btnAdd = document.getElementById('btn-add-addon');
+    const MAX_ADDONS = 5;
+
+    function updateAddonUI() {
+        const rows = container.querySelectorAll('.addon-row');
+        const count = rows.length;
+        // Show/hide remove buttons
+        rows.forEach((row, i) => {
+            const btn = row.querySelector('.btn-remove-addon');
+            if (count > 1 && i > 0) {
+                btn.classList.remove('d-none');
+            } else {
+                btn.classList.add('d-none');
+            }
+        });
+        // Disable add button if max reached
+        btnAdd.disabled = count >= MAX_ADDONS;
+    }
+
+    btnAdd.addEventListener('click', function() {
+        const rows = container.querySelectorAll('.addon-row');
+        if (rows.length >= MAX_ADDONS) return;
+
+        const row = document.createElement('div');
+        row.className = 'addon-row input-group mb-2';
+        row.innerHTML = `
+            <input type="text" name="addons" class="form-control" placeholder="加料 ${rows.length + 1}">
+            <button type="button" class="btn btn-outline-danger btn-remove-addon" title="移除">
+                <i class="bi bi-dash-lg"></i>
+            </button>
+        `;
+        container.appendChild(row);
+        updateAddonUI();
+    });
+
+    container.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-remove-addon');
+        if (!btn) return;
+        const rows = container.querySelectorAll('.addon-row');
+        if (rows.length <= 1) return;
+        btn.closest('.addon-row').remove();
+        updateAddonUI();
+    });
+
+    updateAddonUI();
+})();
+</script>
+{% endblock %}

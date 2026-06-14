@@ -1,0 +1,30 @@
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+.card {
+    border: none;
+    border-radius: 0.75rem;
+}
+
+.card-header {
+    border-radius: 0.75rem 0.75rem 0 0 !important;
+}
+
+.table th {
+    white-space: nowrap;
+}
+
+.btn-group-sm > .btn {
+    padding: 0.2rem 0.4rem;
+}
+
+.alert {
+    border-radius: 0.5rem;
+}
