@@ -1,22 +1,28 @@
 import os
 import uuid
+import hmac
 from datetime import datetime, timezone
 from functools import wraps
 
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session as flask_session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
 import bcrypt
 
 from config import Config
 from models import db, User, Department, Session, Order, OrderAddon, SystemSetting, now
-from forms import LoginForm, RegisterForm, SessionForm, DepartmentForm, OrderForm, SettingsForm
+from forms import LoginForm, AdminEntryPasswordForm, RegisterForm, SessionForm, DepartmentForm, OrderForm, SettingsForm
 from utils import export_orders_to_excel
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    app.config['ADMIN_ENTRY_PASSWORD'] = os.environ.get('ADMIN_ENTRY_PASSWORD', app.config.get('ADMIN_ENTRY_PASSWORD'))
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+        'DATABASE_URL',
+        app.config.get('SQLALCHEMY_DATABASE_URI'),
+    )
 
     db.init_app(app)
 
@@ -39,6 +45,27 @@ def create_app():
         def decorated(*args, **kwargs):
             return f(*args, **kwargs)
         return decorated
+
+    def admin_entry_verified():
+        return current_user.is_authenticated or flask_session.get('admin_entry_verified') is True
+
+    def current_path_with_query():
+        query = request.query_string.decode('utf-8')
+        return f'{request.path}?{query}' if query else request.path
+
+    def safe_admin_next(next_page):
+        if not next_page:
+            return None
+        if next_page.startswith('/admin') and not next_page.startswith('//'):
+            return next_page
+        return None
+
+    def require_admin_entry():
+        if admin_entry_verified():
+            return None
+        if not app.config.get('ADMIN_ENTRY_PASSWORD'):
+            flash('尚未設定 ADMIN_ENTRY_PASSWORD 環境變數，無法進入後台。', 'danger')
+        return redirect(url_for('admin_entry', next=current_path_with_query()))
 
     # -------------------- Context processor --------------------
     @app.context_processor
@@ -111,10 +138,31 @@ def create_app():
         return render_template('order_success.html', order=order, session=session_obj)
 
     # -------------------- Admin: Auth --------------------
+    @app.route('/admin/entry', methods=['GET', 'POST'])
+    def admin_entry():
+        if current_user.is_authenticated:
+            return redirect(url_for('admin_dashboard'))
+
+        form = AdminEntryPasswordForm()
+        entry_password = app.config.get('ADMIN_ENTRY_PASSWORD')
+
+        if form.validate_on_submit():
+            if entry_password and hmac.compare_digest(form.password.data, entry_password):
+                flask_session['admin_entry_verified'] = True
+                flash('入口密碼驗證成功，請登入管理員帳號。', 'success')
+                next_page = safe_admin_next(request.args.get('next'))
+                return redirect(next_page or url_for('admin_login'))
+            flash('後台入口密碼錯誤。', 'danger')
+
+        return render_template('admin/entry.html', form=form, entry_password_configured=bool(entry_password))
+
     @app.route('/admin/login', methods=['GET', 'POST'])
     def admin_login():
         if current_user.is_authenticated:
             return redirect(url_for('admin_dashboard'))
+        entry_redirect = require_admin_entry()
+        if entry_redirect:
+            return entry_redirect
         form = LoginForm()
         if form.validate_on_submit():
             user = User.query.filter_by(username=form.username.data).first()
@@ -130,6 +178,9 @@ def create_app():
     def admin_register():
         if current_user.is_authenticated:
             return redirect(url_for('admin_dashboard'))
+        entry_redirect = require_admin_entry()
+        if entry_redirect:
+            return entry_redirect
         form = RegisterForm()
         if form.validate_on_submit():
             if User.query.filter_by(username=form.username.data).first():
@@ -147,6 +198,7 @@ def create_app():
     @login_required
     def admin_logout():
         logout_user()
+        flask_session.pop('admin_entry_verified', None)
         flash('已登出。', 'info')
         return redirect(url_for('index'))
 

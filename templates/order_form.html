@@ -10,11 +10,17 @@
             </div>
 
             {% if session.photo_path %}
+            {% set photo_url = url_for('static', filename='uploads/photos/' + session.photo_path) %}
             <div class="text-center p-3 bg-light border-bottom">
-                <img src="{{ url_for('static', filename='uploads/photos/' + session.photo_path) }}"
-                     class="img-fluid rounded" alt="訂單照片" style="max-height:400px;cursor:zoom-in;"
+                <img src="{{ photo_url }}"
+                     class="order-photo-preview rounded" alt="訂單照片"
                      data-bs-toggle="modal" data-bs-target="#photoModal">
-                <p class="text-muted small mt-1 mb-0">訂單照片參考（點擊放大）</p>
+                <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
+                    <span class="text-muted small align-self-center">訂單照片參考（點擊放大）</span>
+                    <a href="{{ photo_url }}" class="btn btn-outline-primary btn-sm" download="{{ session.photo_path }}">
+                        <i class="bi bi-download"></i> 下載圖片
+                    </a>
+                </div>
             </div>
             {% endif %}
 
@@ -93,15 +99,19 @@
 </div>
 
 {% if session.photo_path %}
+{% set photo_url = url_for('static', filename='uploads/photos/' + session.photo_path) %}
 <div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered order-photo-modal-dialog">
         <div class="modal-content bg-dark">
-            <div class="modal-header border-0">
+            <div class="modal-header border-0 justify-content-end gap-2">
+                <a href="{{ photo_url }}" class="btn btn-outline-light btn-sm" download="{{ session.photo_path }}">
+                    <i class="bi bi-download"></i> 下載圖片
+                </a>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body text-center p-4">
-                <img src="{{ url_for('static', filename='uploads/photos/' + session.photo_path) }}"
-                     class="img-fluid" alt="訂單照片（完整大小）">
+            <div class="modal-body text-center p-2 p-md-3">
+                <img src="{{ photo_url }}"
+                     class="order-photo-modal-image" alt="訂單照片（完整大小）">
             </div>
         </div>
     </div>

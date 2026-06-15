@@ -10,6 +10,11 @@ class LoginForm(FlaskForm):
     submit = SubmitField('登入')
 
 
+class AdminEntryPasswordForm(FlaskForm):
+    password = PasswordField('後台入口密碼', validators=[DataRequired(message='請輸入後台入口密碼')])
+    submit = SubmitField('進入後台登入')
+
+
 class RegisterForm(FlaskForm):
     username = StringField('帳號', validators=[
         DataRequired(message='請輸入帳號'),
