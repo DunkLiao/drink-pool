@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}菜單品項 - {{ session.title }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="mb-0"><i class="bi bi-card-list"></i> {{ session.title }}</h3>
+        <small class="text-muted">菜單品項與價格管理</small>
+    </div>
+    <div class="d-flex gap-2">
+        <form method="POST" action="{{ url_for('admin_session_menu_ocr', session_id=session.id) }}">
+            <button class="btn btn-outline-primary" {{ 'disabled' if not session.photo_path else '' }}>
+                <i class="bi bi-magic"></i> 重新 OCR
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('admin_session_menu_ai_draft', session_id=session.id) }}">
+            <button class="btn btn-outline-success" {{ 'disabled' if not ai_can_run else '' }}>
+                <i class="bi bi-stars"></i> AI 修正 OCR
+            </button>
+        </form>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回後台
+        </a>
+    </div>
+</div>
+
+<div class="alert alert-info d-flex justify-content-between align-items-start gap-3">
+    <div>
+        {% if session.ocr_status == 'pending' %}
+        <strong>OCR 等待中</strong>
+        <div class="small">已排入背景辨識，稍後重新整理此頁查看結果。</div>
+        {% elif session.ocr_status == 'running' %}
+        <strong>OCR 辨識中</strong>
+        <div class="small">系統正在背景辨識菜單，期間仍可手動新增品項。</div>
+        {% elif session.ocr_status == 'done' %}
+        <strong>OCR 已完成</strong>
+        <div class="small">已完成辨識，請檢查下方品項與價格是否需要修正。</div>
+        {% elif session.ocr_status == 'failed' %}
+        <strong>OCR 辨識失敗</strong>
+        <div class="small">{{ session.ocr_error or '請確認圖片清晰度，或改用手動新增品項。' }}</div>
+        {% else %}
+        <strong>OCR 尚未執行</strong>
+        <div class="small">可上傳菜單照片或按重新 OCR 產生初始品項。</div>
+        {% endif %}
+    </div>
+    {% if session.ocr_completed_at %}
+    <small class="text-muted">{{ session.ocr_completed_at.strftime('%m/%d %H:%M') }}</small>
+    {% endif %}
+</div>
+
+{% if not ai_enabled %}
+<div class="alert alert-warning">
+    尚未設定 OPENROUTER_API_KEY，AI 修正 OCR 暫不可用。
+</div>
+{% elif session.photo_path and not ai_can_run %}
+<div class="alert alert-secondary">
+    {% if ai_active %}
+    AI 修正已在背景處理中，請稍後重新整理此頁查看結果。
+    {% elif session.ocr_status != 'done' or not menu_items %}
+    請先完成 OCR 或手動新增品項，再執行 AI 修正。
+    {% endif %}
+</div>
+{% endif %}
+
+{% if ai_drafts %}
+<div class="card shadow mb-4">
+    <div class="card-header app-card-header">
+        <i class="bi bi-stars"></i> AI 修正草稿
+    </div>
+    <div class="card-body">
+        {% for draft in ai_drafts %}
+            <div class="border rounded p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <strong>草稿 #{{ draft.id }}</strong>
+                        <span class="badge bg-{{ 'success' if draft.status == 'applied' else 'warning text-dark' if draft.status == 'pending' else 'info text-dark' if draft.status in ['queued', 'running'] else 'danger' }}">
+                            {{ draft.status }}
+                        </span>
+                    </div>
+                    <small class="text-muted">{{ draft.created_at.strftime('%m/%d %H:%M') }}</small>
+                </div>
+                {% if draft.error %}
+                <div class="alert alert-danger py-2">{{ draft.error }}</div>
+                {% endif %}
+                {% if draft.status in ['queued', 'running'] %}
+                <div class="alert alert-info py-2 mb-0">
+                    AI 修正處理中，完成後會顯示可套用品項。
+                </div>
+                {% endif %}
+                {% if draft.suggested_item_list %}
+                <form method="POST" action="{{ url_for('admin_session_menu_ai_draft_apply', session_id=session.id, draft_id=draft.id) }}">
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="width:48px;">套用</th>
+                                    <th>品項</th>
+                                    <th style="width:90px;">價格</th>
+                                    <th>分類</th>
+                                    <th>信心</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in draft.suggested_item_list %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" name="item_index" value="{{ loop.index0 }}" {{ 'disabled' if draft.status != 'pending' else 'checked' }}>
+                                    </td>
+                                    <td>{{ item.name }}</td>
+                                    <td>{{ item.price }}</td>
+                                    <td>{{ item.category or '' }}</td>
+                                    <td>{{ '%.0f%%'|format((item.confidence or 0) * 100) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if draft.status == 'pending' %}
+                    <button class="btn btn-success btn-sm">
+                        <i class="bi bi-check2-circle"></i> 套用勾選品項
+                    </button>
+                    {% endif %}
+                </form>
+                {% endif %}
+                {% if draft.rejected_text_list %}
+                <div class="small text-muted mt-2">
+                    排除文字：{{ draft.rejected_text_list|join('、') }}
+                </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card shadow">
+            <div class="card-header app-card-header">
+                <i class="bi bi-plus-lg"></i> 新增品項
+            </div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else ""), placeholder="例如：珍珠奶茶") }}
+                        {% for error in form.name.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.price.label(class="form-label") }}
+                        {{ form.price(class="form-control" + (" is-invalid" if form.price.errors else ""), min="0", max="9999", placeholder="55") }}
+                        {% for error in form.price.errors %}
+                        <div class="invalid-feedback">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {{ form.submit(class="btn btn-primary w-100") }}
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-body">
+                {% if menu_items %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>排序</th>
+                                <th>品項</th>
+                                <th>價格</th>
+                                <th>狀態</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in menu_items %}
+                            <tr>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <form method="POST" action="{{ url_for('admin_menu_item_sort', item_id=item.id) }}">
+                                            <input type="hidden" name="direction" value="up">
+                                            <button class="btn btn-outline-secondary" title="上移">
+                                                <i class="bi bi-arrow-up"></i>
+                                            </button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('admin_menu_item_sort', item_id=item.id) }}">
+                                            <input type="hidden" name="direction" value="down">
+                                            <button class="btn btn-outline-secondary" title="下移">
+                                                <i class="bi bi-arrow-down"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                                <td>
+                                    <form id="edit-menu-item-{{ item.id }}" method="POST" action="{{ url_for('admin_menu_item_edit', item_id=item.id) }}" class="d-flex gap-2">
+                                        <input type="text" name="name" value="{{ item.name }}" class="form-control form-control-sm" required maxlength="200">
+                                    </form>
+                                </td>
+                                <td style="width:120px;">
+                                    <input form="edit-menu-item-{{ item.id }}" type="number" name="price" value="{{ item.price }}" min="0" max="9999" class="form-control form-control-sm" required>
+                                </td>
+                                <td>
+                                    {% if item.is_active %}
+                                    <span class="badge bg-success">啟用</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">停用</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <button form="edit-menu-item-{{ item.id }}" class="btn btn-outline-primary" title="儲存">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <form method="POST" action="{{ url_for('admin_menu_item_toggle', item_id=item.id) }}">
+                                            <button class="btn btn-outline-secondary" title="切換狀態">
+                                                <i class="bi bi-{{ 'pause' if item.is_active else 'play' }}-fill"></i>
+                                            </button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('admin_menu_item_delete', item_id=item.id) }}" onsubmit="return confirm('確定要刪除此品項嗎？');">
+                                            <button class="btn btn-outline-danger" title="刪除">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox" style="font-size:3rem;"></i>
+                    <p class="mt-2">尚無菜單品項，可重新 OCR 或手動新增。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

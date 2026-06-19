@@ -27,6 +27,12 @@ load_env_file()
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'drink-pool-secret-key-change-in-production')
     ADMIN_ENTRY_PASSWORD = os.environ.get('ADMIN_ENTRY_PASSWORD')
+    OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+    OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'openai/gpt-4o-2024-08-06')
+    OPENROUTER_SITE_URL = os.environ.get('OPENROUTER_SITE_URL')
+    OPENROUTER_SITE_NAME = os.environ.get('OPENROUTER_SITE_NAME', 'drink-pool')
+    OPENROUTER_TIMEOUT_SECONDS = int(os.environ.get('OPENROUTER_TIMEOUT_SECONDS', '90'))
+    OPENROUTER_IMAGE_MAX_SIDE = int(os.environ.get('OPENROUTER_IMAGE_MAX_SIDE', '1200'))
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', f'sqlite:///{os.path.join(BASE_DIR, "db", "drink_pool.db")}')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads', 'photos')

@@ -1,7 +1,7 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
-from wtforms import StringField, PasswordField, SelectField, TextAreaField, DateTimeLocalField, SubmitField
-from wtforms.validators import DataRequired, Length, Email, EqualTo, Optional
+from wtforms import IntegerField, StringField, PasswordField, SelectField, TextAreaField, DateTimeLocalField, SubmitField
+from wtforms.validators import DataRequired, Length, Email, EqualTo, NumberRange, Optional
 
 
 class LoginForm(FlaskForm):
@@ -45,6 +45,15 @@ class SessionForm(FlaskForm):
 class DepartmentForm(FlaskForm):
     name = StringField('科別名稱', validators=[DataRequired(message='請輸入科別名稱'), Length(max=100)])
     submit = SubmitField('新增')
+
+
+class MenuItemForm(FlaskForm):
+    name = StringField('品項名稱', validators=[DataRequired(message='請輸入品項名稱'), Length(max=200)])
+    price = IntegerField('價格', validators=[
+        DataRequired(message='請輸入價格'),
+        NumberRange(min=0, max=9999, message='價格需介於 0 到 9999'),
+    ])
+    submit = SubmitField('新增品項')
 
 
 class OrderForm(FlaskForm):

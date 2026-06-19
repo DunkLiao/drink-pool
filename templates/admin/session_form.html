@@ -34,6 +34,9 @@
                             <img src="{{ url_for('static', filename='uploads/photos/' + session.photo_path) }}"
                                  class="img-thumbnail" style="max-height:200px;" alt="目前照片">
                             <p class="text-muted small">目前照片（上傳新照片將取代）</p>
+                            <a href="{{ url_for('admin_session_menu', session_id=session.id) }}" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-card-list"></i> 管理菜單品項
+                            </a>
                         </div>
                         {% endif %}
                     </div>

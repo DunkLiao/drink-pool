@@ -16,6 +16,9 @@
                         <tr><td class="text-muted" style="width:100px;">姓名</td><td>{{ order.name }}</td></tr>
                         <tr><td class="text-muted">科別</td><td>{{ order.department.name if order.department else '' }}</td></tr>
                         <tr><td class="text-muted">品項</td><td>{{ order.drink_item }}</td></tr>
+                        {% if order.drink_price is not none %}
+                        <tr><td class="text-muted">單價</td><td>${{ order.drink_price }}</td></tr>
+                        {% endif %}
                         <tr><td class="text-muted">甜度</td><td>{{ order.sweetness }}</td></tr>
                         <tr><td class="text-muted">冰塊</td><td>{{ order.ice }}</td></tr>
                         {% if order.addons %}

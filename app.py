@@ -1,30 +1,125 @@
 import os
+import json
 import uuid
 import hmac
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import wraps
 
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session as flask_session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 import bcrypt
 
 from config import Config
-from models import db, User, Department, Session, Order, OrderAddon, SystemSetting, now
-from forms import LoginForm, AdminEntryPasswordForm, RegisterForm, SessionForm, DepartmentForm, OrderForm, SettingsForm
+from models import db, User, Department, AiMenuDraft, MenuItem, Session, Order, OrderAddon, SystemSetting, now
+from forms import LoginForm, AdminEntryPasswordForm, RegisterForm, SessionForm, DepartmentForm, MenuItemForm, OrderForm, SettingsForm
+from ai_menu import DEFAULT_OPENROUTER_MODEL, OpenRouterMenuCorrectionClient
+from ocr import extract_menu_items_from_image, normalize_menu_name
 from utils import export_orders_to_excel
+
+
+def ensure_schema_upgrades():
+    inspector = inspect(db.engine)
+    if 'sessions' in inspector.get_table_names():
+        session_columns = {column['name'] for column in inspector.get_columns('sessions')}
+        session_column_defs = {
+            'ocr_status': "ALTER TABLE sessions ADD COLUMN ocr_status VARCHAR(20) DEFAULT 'not_started'",
+            'ocr_started_at': 'ALTER TABLE sessions ADD COLUMN ocr_started_at DATETIME',
+            'ocr_completed_at': 'ALTER TABLE sessions ADD COLUMN ocr_completed_at DATETIME',
+            'ocr_error': 'ALTER TABLE sessions ADD COLUMN ocr_error TEXT',
+        }
+        for column_name, sql in session_column_defs.items():
+            if column_name not in session_columns:
+                db.session.execute(text(sql))
+        db.session.commit()
+
+    if 'orders' in inspector.get_table_names():
+        order_columns = {column['name'] for column in inspector.get_columns('orders')}
+        if 'drink_price' not in order_columns:
+            db.session.execute(text('ALTER TABLE orders ADD COLUMN drink_price INTEGER'))
+            db.session.commit()
+
+
+def menu_items_as_ai_candidates(session_id):
+    items = MenuItem.query.filter_by(session_id=session_id).order_by(
+        MenuItem.sort_order.asc(),
+        MenuItem.name.asc(),
+    ).all()
+    return [{
+        'name': item.name,
+        'price': item.price,
+        'ocr_confidence': item.ocr_confidence,
+        'sort_order': item.sort_order,
+    } for item in items]
+
+
+def ai_draft_diagnostics(app, session_obj, candidates, started_at, exc=None):
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], session_obj.photo_path or '')
+    return {
+        'model': app.config.get('OPENROUTER_MODEL') or DEFAULT_OPENROUTER_MODEL,
+        'image_bytes': os.path.getsize(image_path) if os.path.exists(image_path) else None,
+        'candidate_count': len(candidates),
+        'duration_seconds': round(time.perf_counter() - started_at, 3),
+        'error_type': type(exc).__name__ if exc else None,
+        'upstream_detail': str(exc) if exc else None,
+    }
+
+
+def friendly_ai_error(exc):
+    message = str(exc)
+    if 'OpenRouter' in message or 'timed out' in message or 'timeout' in message.lower():
+        return 'OpenRouter 回應異常，請稍後重試。'
+    return 'AI 修正 OCR 失敗，請稍後重試或改用手動修正。'
+
+
+def generate_ai_menu_draft(app, session_obj, candidates=None):
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], session_obj.photo_path)
+    if candidates is None:
+        candidates = menu_items_as_ai_candidates(session_obj.id)
+    client = OpenRouterMenuCorrectionClient(
+        api_key=app.config.get('OPENROUTER_API_KEY'),
+        model=app.config.get('OPENROUTER_MODEL') or DEFAULT_OPENROUTER_MODEL,
+        site_url=app.config.get('OPENROUTER_SITE_URL'),
+        site_name=app.config.get('OPENROUTER_SITE_NAME'),
+        timeout=int(app.config.get('OPENROUTER_TIMEOUT_SECONDS', 90)),
+        image_max_side=int(app.config.get('OPENROUTER_IMAGE_MAX_SIDE', 1200)),
+    )
+    return client.correct_menu(
+        image_path=image_path,
+        ocr_boxes=[],
+        candidates=candidates,
+        session_title=session_obj.title,
+    )
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     app.config['ADMIN_ENTRY_PASSWORD'] = os.environ.get('ADMIN_ENTRY_PASSWORD', app.config.get('ADMIN_ENTRY_PASSWORD'))
+    app.config['OPENROUTER_API_KEY'] = os.environ.get('OPENROUTER_API_KEY')
+    app.config['OPENROUTER_MODEL'] = os.environ.get('OPENROUTER_MODEL', app.config.get('OPENROUTER_MODEL'))
+    app.config['OPENROUTER_SITE_URL'] = os.environ.get('OPENROUTER_SITE_URL', app.config.get('OPENROUTER_SITE_URL'))
+    app.config['OPENROUTER_SITE_NAME'] = os.environ.get('OPENROUTER_SITE_NAME', app.config.get('OPENROUTER_SITE_NAME'))
+    app.config['OPENROUTER_TIMEOUT_SECONDS'] = int(os.environ.get(
+        'OPENROUTER_TIMEOUT_SECONDS',
+        app.config.get('OPENROUTER_TIMEOUT_SECONDS', 90),
+    ))
+    app.config['OPENROUTER_IMAGE_MAX_SIDE'] = int(os.environ.get(
+        'OPENROUTER_IMAGE_MAX_SIDE',
+        app.config.get('OPENROUTER_IMAGE_MAX_SIDE', 1200),
+    ))
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
         'DATABASE_URL',
         app.config.get('SQLALCHEMY_DATABASE_URI'),
     )
 
     db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        ensure_schema_upgrades()
 
     login_manager = LoginManager()
     login_manager.init_app(app)
@@ -37,6 +132,134 @@ def create_app():
 
     # Ensure upload folder exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    app.extensions['menu_ocr_executor'] = ThreadPoolExecutor(max_workers=1)
+    app.extensions['menu_ai_executor'] = ThreadPoolExecutor(max_workers=1)
+
+    def save_uploaded_photo(photo):
+        ext = os.path.splitext(secure_filename(photo.filename))[1]
+        filename = f'{uuid.uuid4().hex}{ext}'
+        photo.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        return filename
+
+    def import_menu_items_from_photo(session_obj):
+        if not session_obj.photo_path:
+            return 0
+
+        image_path = os.path.join(app.config['UPLOAD_FOLDER'], session_obj.photo_path)
+        recognized_items = extract_menu_items_from_image(image_path)
+        existing_names = {
+            normalize_menu_name(item.name)
+            for item in MenuItem.query.filter_by(session_id=session_obj.id).all()
+        }
+        sort_order = MenuItem.query.filter_by(session_id=session_obj.id).count()
+        imported_count = 0
+        for item_data in recognized_items:
+            normalized = normalize_menu_name(item_data['name'])
+            if normalized in existing_names:
+                continue
+            db.session.add(MenuItem(
+                session_id=session_obj.id,
+                name=item_data['name'],
+                price=item_data['price'],
+                sort_order=sort_order,
+                ocr_confidence=item_data.get('ocr_confidence'),
+            ))
+            existing_names.add(normalized)
+            sort_order += 1
+            imported_count += 1
+        return imported_count
+
+    def run_menu_ocr_job(session_id):
+        with app.app_context():
+            session_obj = Session.query.get(session_id)
+            if not session_obj:
+                return
+            session_obj.ocr_status = 'running'
+            session_obj.ocr_started_at = now()
+            session_obj.ocr_completed_at = None
+            session_obj.ocr_error = None
+            db.session.commit()
+
+            try:
+                imported_count = import_menu_items_from_photo(session_obj)
+                session_obj.ocr_status = 'done'
+                session_obj.ocr_completed_at = now()
+                session_obj.ocr_error = None
+                db.session.commit()
+                app.logger.info('PaddleOCR imported %s menu items for session %s', imported_count, session_id)
+            except Exception as exc:
+                db.session.rollback()
+                failed_session = Session.query.get(session_id)
+                if failed_session:
+                    failed_session.ocr_status = 'failed'
+                    failed_session.ocr_completed_at = now()
+                    failed_session.ocr_error = str(exc)
+                    db.session.commit()
+                app.logger.warning('PaddleOCR import failed for session %s: %s', session_id, exc)
+
+    def enqueue_menu_ocr(session_obj):
+        session_obj.ocr_status = 'pending'
+        session_obj.ocr_started_at = None
+        session_obj.ocr_completed_at = None
+        session_obj.ocr_error = None
+        db.session.commit()
+
+        if app.config.get('MENU_OCR_INLINE'):
+            run_menu_ocr_job(session_obj.id)
+        else:
+            app.extensions['menu_ocr_executor'].submit(run_menu_ocr_job, session_obj.id)
+
+    def run_menu_ocr(session_obj):
+        try:
+            enqueue_menu_ocr(session_obj)
+        except Exception as exc:
+            app.logger.warning('PaddleOCR import failed for session %s: %s', session_obj.id, exc)
+            flash(f'OCR 辨識失敗：{exc}', 'warning')
+            return
+
+        flash('OCR 已排入背景辨識，完成後可到菜單品項頁查看。', 'info')
+
+    def run_ai_menu_draft_job(draft_id):
+        with app.app_context():
+            draft = AiMenuDraft.query.get(draft_id)
+            if not draft:
+                return
+            session_obj = Session.query.get(draft.session_id)
+            if not session_obj:
+                return
+            candidates = menu_items_as_ai_candidates(session_obj.id)
+            started_at = time.perf_counter()
+            draft.status = 'running'
+            draft.error = None
+            draft.raw_payload = json.dumps(
+                ai_draft_diagnostics(app, session_obj, candidates, started_at),
+                ensure_ascii=False,
+            )
+            db.session.commit()
+
+            try:
+                result = generate_ai_menu_draft(app, session_obj, candidates=candidates)
+                draft.status = 'pending'
+                draft.raw_payload = json.dumps(result, ensure_ascii=False)
+                draft.suggested_items = json.dumps(result.get('items', []), ensure_ascii=False)
+                draft.rejected_texts = json.dumps(result.get('rejected_texts', []), ensure_ascii=False)
+                draft.error = None
+                db.session.commit()
+            except Exception as exc:
+                db.session.rollback()
+                failed_draft = AiMenuDraft.query.get(draft_id)
+                failed_session = Session.query.get(session_obj.id)
+                if failed_draft and failed_session:
+                    failed_draft.status = 'failed'
+                    failed_draft.error = friendly_ai_error(exc)
+                    failed_draft.raw_payload = json.dumps(
+                        ai_draft_diagnostics(app, failed_session, candidates, started_at, exc),
+                        ensure_ascii=False,
+                    )
+                    failed_draft.suggested_items = '[]'
+                    failed_draft.rejected_texts = '[]'
+                    db.session.commit()
+                app.logger.exception('AI menu draft failed for session %s draft %s', session_obj.id, draft_id)
 
     # -------------------- Admin required decorator --------------------
     def admin_required(f):
@@ -97,7 +320,11 @@ def create_app():
         form.department.choices = [(d.id, d.name) for d in departments]
         form.sweetness.choices = Config.SWEETNESS_CHOICES
         form.ice.choices = Config.ICE_CHOICES
-        return render_template('order_form.html', form=form, session=session_obj)
+        menu_items = MenuItem.query.filter_by(
+            session_id=session_id,
+            is_active=True,
+        ).order_by(MenuItem.sort_order.asc(), MenuItem.name.asc()).all()
+        return render_template('order_form.html', form=form, session=session_obj, menu_items=menu_items)
 
     @app.route('/order/<int:session_id>', methods=['POST'])
     def order_submit(session_id):
@@ -113,13 +340,30 @@ def create_app():
         form.ice.choices = Config.ICE_CHOICES
 
         if not form.validate_on_submit():
-            return render_template('order_form.html', form=form, session=session_obj)
+            menu_items = MenuItem.query.filter_by(
+                session_id=session_id,
+                is_active=True,
+            ).order_by(MenuItem.sort_order.asc(), MenuItem.name.asc()).all()
+            return render_template('order_form.html', form=form, session=session_obj, menu_items=menu_items)
+
+        selected_item = None
+        menu_item_id = request.form.get('menu_item_id')
+        if menu_item_id:
+            selected_item = MenuItem.query.filter_by(
+                id=menu_item_id,
+                session_id=session_obj.id,
+                is_active=True,
+            ).first()
+
+        drink_item = selected_item.name if selected_item else form.drink_item.data.strip()
+        drink_price = selected_item.price if selected_item else None
 
         order = Order(
             session_id=session_obj.id,
             name=form.name.data.strip(),
             department_id=form.department.data,
-            drink_item=form.drink_item.data.strip(),
+            drink_item=drink_item,
+            drink_price=drink_price,
             sweetness=form.sweetness.data,
             ice=form.ice.data,
             notes=form.notes.data.strip() if form.notes.data else None,
@@ -217,11 +461,7 @@ def create_app():
         if form.validate_on_submit():
             photo_path = None
             if form.photo.data:
-                photo = form.photo.data
-                ext = os.path.splitext(secure_filename(photo.filename))[1]
-                filename = f'{uuid.uuid4().hex}{ext}'
-                photo.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                photo_path = filename
+                photo_path = save_uploaded_photo(form.photo.data)
 
             session_obj = Session(
                 title=form.title.data.strip(),
@@ -231,7 +471,10 @@ def create_app():
                 created_by=current_user.id,
             )
             db.session.add(session_obj)
+            db.session.flush()
             db.session.commit()
+            if photo_path:
+                run_menu_ocr(session_obj)
             flash('團購場次已建立。', 'success')
             return redirect(url_for('admin_dashboard'))
         return render_template('admin/session_form.html', form=form, editing=False)
@@ -252,11 +495,9 @@ def create_app():
                     old_path = os.path.join(app.config['UPLOAD_FOLDER'], session_obj.photo_path)
                     if os.path.exists(old_path):
                         os.remove(old_path)
-                photo = form.photo.data
-                ext = os.path.splitext(secure_filename(photo.filename))[1]
-                filename = f'{uuid.uuid4().hex}{ext}'
-                photo.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                session_obj.photo_path = filename
+                session_obj.photo_path = save_uploaded_photo(form.photo.data)
+                db.session.commit()
+                run_menu_ocr(session_obj)
 
             db.session.commit()
             flash('場次已更新。', 'success')
@@ -286,6 +527,238 @@ def create_app():
         status = '啟用' if session_obj.is_active else '停用'
         flash(f'場次已{status}。', 'info')
         return redirect(url_for('admin_dashboard'))
+
+    # -------------------- Admin: Menu Items --------------------
+    @app.route('/admin/session/<int:session_id>/menu', methods=['GET', 'POST'])
+    @admin_required
+    def admin_session_menu(session_id):
+        session_obj = Session.query.get_or_404(session_id)
+        form = MenuItemForm()
+        if form.validate_on_submit():
+            normalized = normalize_menu_name(form.name.data)
+            duplicate = next(
+                (
+                    item for item in MenuItem.query.filter_by(session_id=session_id).all()
+                    if normalize_menu_name(item.name) == normalized
+                ),
+                None,
+            )
+            if duplicate:
+                flash('此品項已存在。', 'danger')
+            else:
+                sort_order = MenuItem.query.filter_by(session_id=session_id).count()
+                item = MenuItem(
+                    session_id=session_id,
+                    name=form.name.data.strip(),
+                    price=form.price.data,
+                    sort_order=sort_order,
+                )
+                db.session.add(item)
+                db.session.commit()
+                flash('菜單品項已新增。', 'success')
+                return redirect(url_for('admin_session_menu', session_id=session_id))
+
+        menu_items = MenuItem.query.filter_by(session_id=session_id).order_by(
+            MenuItem.sort_order.asc(),
+            MenuItem.name.asc(),
+        ).all()
+        ai_drafts = AiMenuDraft.query.filter_by(session_id=session_id).order_by(
+            AiMenuDraft.created_at.desc(),
+        ).limit(5).all()
+        ai_active = any(draft.status in ('queued', 'running') for draft in ai_drafts)
+        ai_can_run = (
+            bool(app.config.get('OPENROUTER_API_KEY'))
+            and bool(session_obj.photo_path)
+            and session_obj.ocr_status == 'done'
+            and bool(menu_items)
+            and not ai_active
+        )
+        return render_template(
+            'admin/menu_items.html',
+            session=session_obj,
+            form=form,
+            menu_items=menu_items,
+            ai_drafts=ai_drafts,
+            ai_enabled=bool(app.config.get('OPENROUTER_API_KEY')),
+            ai_can_run=ai_can_run,
+            ai_active=ai_active,
+        )
+
+    @app.route('/admin/menu-item/<int:item_id>/edit', methods=['POST'])
+    @admin_required
+    def admin_menu_item_edit(item_id):
+        item = MenuItem.query.get_or_404(item_id)
+        name = request.form.get('name', '').strip()
+        price_raw = request.form.get('price', '').strip()
+        if not name:
+            flash('請輸入品項名稱。', 'danger')
+            return redirect(url_for('admin_session_menu', session_id=item.session_id))
+        try:
+            price = int(price_raw)
+        except ValueError:
+            flash('價格需為整數。', 'danger')
+            return redirect(url_for('admin_session_menu', session_id=item.session_id))
+        if price < 0 or price > 9999:
+            flash('價格需介於 0 到 9999。', 'danger')
+            return redirect(url_for('admin_session_menu', session_id=item.session_id))
+
+        duplicate = next(
+            (
+                other for other in MenuItem.query.filter_by(session_id=item.session_id).all()
+                if other.id != item.id and normalize_menu_name(other.name) == normalize_menu_name(name)
+            ),
+            None,
+        )
+        if duplicate:
+            flash('此品項已存在。', 'danger')
+            return redirect(url_for('admin_session_menu', session_id=item.session_id))
+
+        item.name = name
+        item.price = price
+        db.session.commit()
+        flash('菜單品項已更新。', 'success')
+        return redirect(url_for('admin_session_menu', session_id=item.session_id))
+
+    @app.route('/admin/menu-item/<int:item_id>/toggle', methods=['POST'])
+    @admin_required
+    def admin_menu_item_toggle(item_id):
+        item = MenuItem.query.get_or_404(item_id)
+        item.is_active = not item.is_active
+        db.session.commit()
+        flash('菜單品項狀態已更新。', 'info')
+        return redirect(url_for('admin_session_menu', session_id=item.session_id))
+
+    @app.route('/admin/menu-item/<int:item_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_menu_item_delete(item_id):
+        item = MenuItem.query.get_or_404(item_id)
+        session_id = item.session_id
+        db.session.delete(item)
+        db.session.commit()
+        flash('菜單品項已刪除。', 'info')
+        return redirect(url_for('admin_session_menu', session_id=session_id))
+
+    @app.route('/admin/menu-item/<int:item_id>/sort', methods=['POST'])
+    @admin_required
+    def admin_menu_item_sort(item_id):
+        item = MenuItem.query.get_or_404(item_id)
+        direction = request.form.get('direction', 'down')
+        items = MenuItem.query.filter_by(session_id=item.session_id).order_by(MenuItem.sort_order.asc(), MenuItem.id.asc()).all()
+        current_idx = next((i for i, candidate in enumerate(items) if candidate.id == item.id), None)
+        if current_idx is not None:
+            if direction == 'up' and current_idx > 0:
+                items[current_idx].sort_order, items[current_idx - 1].sort_order = items[current_idx - 1].sort_order, items[current_idx].sort_order
+            elif direction == 'down' and current_idx < len(items) - 1:
+                items[current_idx].sort_order, items[current_idx + 1].sort_order = items[current_idx + 1].sort_order, items[current_idx].sort_order
+            db.session.commit()
+        return redirect(url_for('admin_session_menu', session_id=item.session_id))
+
+    @app.route('/admin/session/<int:session_id>/menu/ocr', methods=['POST'])
+    @admin_required
+    def admin_session_menu_ocr(session_id):
+        session_obj = Session.query.get_or_404(session_id)
+        if not session_obj.photo_path:
+            flash('此場次尚未上傳菜單照片。', 'warning')
+        else:
+            run_menu_ocr(session_obj)
+        return redirect(url_for('admin_session_menu', session_id=session_id))
+
+    @app.route('/admin/session/<int:session_id>/menu/ai-draft', methods=['POST'])
+    @admin_required
+    def admin_session_menu_ai_draft(session_id):
+        session_obj = Session.query.get_or_404(session_id)
+        if not session_obj.photo_path:
+            flash('此場次尚未上傳菜單照片。', 'warning')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+        if not app.config.get('OPENROUTER_API_KEY'):
+            flash('尚未設定 OPENROUTER_API_KEY，無法使用 AI 修正 OCR。', 'warning')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+        if session_obj.ocr_status != 'done':
+            flash('請先完成 OCR 或手動新增品項，再執行 AI 修正。', 'warning')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+        if not MenuItem.query.filter_by(session_id=session_id).first():
+            flash('請先完成 OCR 或手動新增品項，再執行 AI 修正。', 'warning')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+        active_draft = AiMenuDraft.query.filter(
+            AiMenuDraft.session_id == session_id,
+            AiMenuDraft.status.in_(('queued', 'running')),
+        ).first()
+        if active_draft:
+            flash('AI 修正已在執行中，請稍後重新整理此頁查看結果。', 'info')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+
+        draft = AiMenuDraft(
+            session_id=session_id,
+            raw_payload='{}',
+            suggested_items='[]',
+            rejected_texts='[]',
+            status='queued',
+        )
+        db.session.add(draft)
+        db.session.commit()
+        app.extensions['menu_ai_executor'].submit(run_ai_menu_draft_job, draft.id)
+        flash('AI 修正已排入背景處理，完成後可重新整理查看草稿。', 'info')
+        return redirect(url_for('admin_session_menu', session_id=session_id))
+
+    @app.route('/admin/session/<int:session_id>/menu/ai-draft/<int:draft_id>/apply', methods=['POST'])
+    @admin_required
+    def admin_session_menu_ai_draft_apply(session_id, draft_id):
+        draft = AiMenuDraft.query.filter_by(id=draft_id, session_id=session_id).first_or_404()
+        if draft.status != 'pending':
+            flash('此 AI 草稿已處理，無法重複套用。', 'warning')
+            return redirect(url_for('admin_session_menu', session_id=session_id))
+
+        selected_indexes = {
+            int(value)
+            for value in request.form.getlist('item_index')
+            if value.isdigit()
+        }
+        try:
+            suggested_items = json.loads(draft.suggested_items)
+        except json.JSONDecodeError:
+            suggested_items = []
+
+        existing_items = MenuItem.query.filter_by(session_id=session_id).all()
+        existing_by_name = {
+            normalize_menu_name(item.name): item
+            for item in existing_items
+        }
+        sort_order = len(existing_items)
+        applied_count = 0
+        for index, item_data in enumerate(suggested_items):
+            if index not in selected_indexes:
+                continue
+            name = str(item_data.get('name', '')).strip()
+            try:
+                price = int(item_data.get('price'))
+            except (TypeError, ValueError):
+                continue
+            if not name or price < 0 or price > 9999:
+                continue
+
+            normalized = normalize_menu_name(name)
+            if normalized in existing_by_name:
+                item = existing_by_name[normalized]
+                item.price = price
+                item.ocr_confidence = item_data.get('confidence')
+            else:
+                item = MenuItem(
+                    session_id=session_id,
+                    name=name,
+                    price=price,
+                    sort_order=sort_order,
+                    ocr_confidence=item_data.get('confidence'),
+                )
+                db.session.add(item)
+                existing_by_name[normalized] = item
+                sort_order += 1
+            applied_count += 1
+
+        draft.status = 'applied'
+        draft.applied_at = now()
+        db.session.commit()
+        flash(f'已套用 {applied_count} 筆 AI 草稿品項。', 'success')
+        return redirect(url_for('admin_session_menu', session_id=session_id))
 
     # -------------------- Admin: Orders --------------------
     @app.route('/admin/session/<int:session_id>/orders')
@@ -381,4 +854,4 @@ if __name__ == '__main__':
     app = create_app()
     with app.app_context():
         db.create_all()
-    app.run(debug=True, port=5001)
+    app.run(debug=True, use_reloader=False, port=5001)

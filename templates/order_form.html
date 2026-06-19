@@ -46,6 +46,17 @@
 
                     <div class="mb-3">
                         {{ form.drink_item.label(class="form-label") }}
+                        {% if menu_items %}
+                        <select id="menu-item-select" name="menu_item_id" class="form-select mb-2">
+                            <option value="">手動輸入或選擇菜單品項</option>
+                            {% for item in menu_items %}
+                            <option value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}">
+                                {{ item.name }} - ${{ item.price }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div id="menu-price-display" class="form-text mb-2">選擇菜單品項後會自動帶入價格。</div>
+                        {% endif %}
                         {{ form.drink_item(class="form-control" + (" is-invalid" if form.drink_item.errors else ""), placeholder="例如：珍珠奶茶、四季春青茶") }}
                         {% for error in form.drink_item.errors %}
                         <div class="invalid-feedback">{{ error }}</div>
@@ -122,6 +133,32 @@
 {% block scripts %}
 <script>
 (function() {
+    const menuSelect = document.getElementById('menu-item-select');
+    const drinkItemInput = document.querySelector('[name="drink_item"]');
+    const priceDisplay = document.getElementById('menu-price-display');
+
+    if (menuSelect && drinkItemInput && priceDisplay) {
+        menuSelect.addEventListener('change', function() {
+            const selected = menuSelect.options[menuSelect.selectedIndex];
+            const itemName = selected.dataset.name || '';
+            const itemPrice = selected.dataset.price || '';
+            if (itemName) {
+                drinkItemInput.value = itemName;
+                priceDisplay.textContent = `已選擇：${itemName}，單價 $${itemPrice}`;
+            } else {
+                priceDisplay.textContent = '選擇菜單品項後會自動帶入價格。';
+            }
+        });
+
+        drinkItemInput.addEventListener('input', function() {
+            const selected = menuSelect.options[menuSelect.selectedIndex];
+            if (selected && selected.dataset.name && drinkItemInput.value !== selected.dataset.name) {
+                menuSelect.value = '';
+                priceDisplay.textContent = '手動輸入品項不會帶入價格。';
+            }
+        });
+    }
+
     const container = document.getElementById('addon-container');
     const btnAdd = document.getElementById('btn-add-addon');
     const MAX_ADDONS = 5;

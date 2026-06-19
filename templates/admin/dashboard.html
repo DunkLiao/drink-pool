@@ -62,6 +62,9 @@
                         <a href="{{ url_for('admin_session_edit', session_id=s.id) }}" class="btn btn-outline-warning" title="編輯">
                             <i class="bi bi-pencil"></i>
                         </a>
+                        <a href="{{ url_for('admin_session_menu', session_id=s.id) }}" class="btn btn-outline-primary" title="菜單品項">
+                            <i class="bi bi-card-list"></i>
+                        </a>
                         <a href="{{ url_for('admin_session_export', session_id=s.id) }}" class="btn btn-outline-success" title="匯出Excel">
                             <i class="bi bi-file-earmark-excel"></i>
                         </a>

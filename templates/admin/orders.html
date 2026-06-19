@@ -29,6 +29,7 @@
                         <th>姓名</th>
                         <th>科別</th>
                         <th>品項</th>
+                        <th>單價</th>
                         <th>甜度</th>
                         <th>冰塊</th>
                         <th>加料</th>
@@ -43,6 +44,7 @@
                         <td>{{ order.name }}</td>
                         <td>{{ order.department.name if order.department else '' }}</td>
                         <td>{{ order.drink_item }}</td>
+                        <td>{{ '$' ~ order.drink_price if order.drink_price is not none else '—' }}</td>
                         <td>{{ order.sweetness }}</td>
                         <td>{{ order.ice }}</td>
                         <td>

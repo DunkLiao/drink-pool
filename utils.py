@@ -24,7 +24,7 @@ def export_orders_to_excel(session):
     wrap_align = Alignment(vertical='center', wrap_text=True)
 
     # Title row
-    ws.merge_cells('A1:H1')
+    ws.merge_cells('A1:I1')
     title_cell = ws['A1']
     title_cell.value = f'【{session.title}】團購訂單彙整'
     title_cell.font = Font(bold=True, size=16)
@@ -32,7 +32,7 @@ def export_orders_to_excel(session):
     ws.row_dimensions[1].height = 36
 
     # Info row
-    ws.merge_cells('A2:H2')
+    ws.merge_cells('A2:I2')
     info_cell = ws['A2']
     time_range = f'{session.start_time.strftime("%Y/%m/%d %H:%M")} ~ {session.end_time.strftime("%Y/%m/%d %H:%M")}'
     info_cell.value = f'團購期間：{time_range}　　匯出時間：{datetime.now().strftime("%Y/%m/%d %H:%M:%S")}'
@@ -41,7 +41,7 @@ def export_orders_to_excel(session):
     ws.row_dimensions[2].height = 24
 
     # Headers
-    headers = ['編號', '姓名', '科別', '飲料品項', '甜度', '冰塊', '加料', '備註']
+    headers = ['編號', '姓名', '科別', '飲料品項', '單價', '甜度', '冰塊', '加料', '備註']
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=4, column=col_idx, value=header)
         cell.font = header_font_white
@@ -58,6 +58,7 @@ def export_orders_to_excel(session):
             order.name,
             order.department.name if order.department else '',
             order.drink_item,
+            order.drink_price if order.drink_price is not None else '',
             order.sweetness,
             order.ice,
             addons_text,
@@ -67,7 +68,7 @@ def export_orders_to_excel(session):
         for col_idx, value in enumerate(row_data, 1):
             cell = ws.cell(row=excel_row, column=col_idx, value=value)
             cell.border = thin_border
-            if col_idx in (1, 5, 6):
+            if col_idx in (1, 5, 6, 7):
                 cell.alignment = center_align
             else:
                 cell.alignment = wrap_align
@@ -75,7 +76,7 @@ def export_orders_to_excel(session):
 
     # Summary row
     summary_row = len(session.orders) + 5
-    ws.merge_cells(f'A{summary_row}:H{summary_row}')
+    ws.merge_cells(f'A{summary_row}:I{summary_row}')
     summary_cell = ws.cell(row=summary_row, column=1)
     summary_cell.value = f'共 {len(session.orders)} 筆訂單'
     summary_cell.font = Font(bold=True, size=11)
@@ -83,7 +84,7 @@ def export_orders_to_excel(session):
     summary_cell.border = thin_border
 
     # Column widths
-    col_widths = [8, 16, 16, 30, 12, 12, 30, 30]
+    col_widths = [8, 16, 16, 30, 10, 12, 12, 30, 30]
     for i, width in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = width
 

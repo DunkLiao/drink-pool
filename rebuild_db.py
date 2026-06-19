@@ -36,6 +36,10 @@ CREATE TABLE sessions (
     start_time DATETIME NOT NULL,
     end_time DATETIME NOT NULL,
     is_active BOOLEAN DEFAULT 1,
+    ocr_status VARCHAR(20) DEFAULT 'not_started',
+    ocr_started_at DATETIME,
+    ocr_completed_at DATETIME,
+    ocr_error TEXT,
     created_by INTEGER NOT NULL,
     created_at DATETIME,
     FOREIGN KEY (created_by) REFERENCES users (id)
@@ -47,12 +51,39 @@ CREATE TABLE orders (
     name VARCHAR(100) NOT NULL,
     department_id INTEGER NOT NULL,
     drink_item VARCHAR(200) NOT NULL,
+    drink_price INTEGER,
     sweetness VARCHAR(20) NOT NULL,
     ice VARCHAR(20) NOT NULL,
     notes TEXT,
     created_at DATETIME,
     FOREIGN KEY (session_id) REFERENCES sessions (id),
     FOREIGN KEY (department_id) REFERENCES departments (id)
+);
+
+CREATE TABLE menu_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    price INTEGER NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT 1,
+    ocr_confidence FLOAT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (session_id) REFERENCES sessions (id)
+);
+
+CREATE TABLE ai_menu_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    raw_payload TEXT NOT NULL DEFAULT '{}',
+    suggested_items TEXT NOT NULL DEFAULT '[]',
+    rejected_texts TEXT NOT NULL DEFAULT '[]',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    error TEXT,
+    created_at DATETIME,
+    applied_at DATETIME,
+    FOREIGN KEY (session_id) REFERENCES sessions (id)
 );
 
 CREATE TABLE order_addons (
