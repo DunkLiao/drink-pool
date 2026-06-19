@@ -4,7 +4,6 @@ import uuid
 import hmac
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from functools import wraps
 
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session as flask_session
@@ -13,7 +12,7 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 import bcrypt
 
-from config import Config
+from config import Config, env_flag
 from models import db, User, Department, AiMenuDraft, MenuItem, Session, Order, OrderAddon, SystemSetting, now
 from forms import LoginForm, AdminEntryPasswordForm, RegisterForm, SessionForm, DepartmentForm, MenuItemForm, OrderForm, SettingsForm
 from ai_menu import DEFAULT_OPENROUTER_MODEL, OpenRouterMenuCorrectionClient
@@ -111,6 +110,7 @@ def create_app():
         'OPENROUTER_IMAGE_MAX_SIDE',
         app.config.get('OPENROUTER_IMAGE_MAX_SIDE', 1200),
     ))
+    app.config['PADDLEOCR_ENABLED'] = env_flag('PADDLEOCR_ENABLED', Config.PADDLEOCR_ENABLED)
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
         'DATABASE_URL',
         app.config.get('SQLALCHEMY_DATABASE_URI'),
@@ -210,6 +210,15 @@ def create_app():
             app.extensions['menu_ocr_executor'].submit(run_menu_ocr_job, session_obj.id)
 
     def run_menu_ocr(session_obj):
+        if not app.config.get('PADDLEOCR_ENABLED'):
+            session_obj.ocr_status = 'not_started'
+            session_obj.ocr_started_at = None
+            session_obj.ocr_completed_at = None
+            session_obj.ocr_error = None
+            db.session.commit()
+            flash('OCR 未啟用，請先手動新增菜單品項；若要使用 OCR，請安裝 requirements-ocr.txt 並設定 PADDLEOCR_ENABLED=true。', 'warning')
+            return
+
         try:
             enqueue_menu_ocr(session_obj)
         except Exception as exc:
@@ -839,7 +848,7 @@ def create_app():
     def admin_session_export(session_id):
         session_obj = Session.query.get_or_404(session_id)
         output = export_orders_to_excel(session_obj)
-        filename = f'團購訂單_{session_obj.title}_{datetime.now().strftime("%Y%m%d")}.xlsx'
+        filename = f'團購訂單_{session_obj.title}_{now().strftime("%Y%m%d")}.xlsx'
         return send_file(
             output,
             as_attachment=True,

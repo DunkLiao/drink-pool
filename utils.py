@@ -1,8 +1,9 @@
 import io
-from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
+
+from models import now
 
 
 def export_orders_to_excel(session):
@@ -35,7 +36,7 @@ def export_orders_to_excel(session):
     ws.merge_cells('A2:I2')
     info_cell = ws['A2']
     time_range = f'{session.start_time.strftime("%Y/%m/%d %H:%M")} ~ {session.end_time.strftime("%Y/%m/%d %H:%M")}'
-    info_cell.value = f'團購期間：{time_range}　　匯出時間：{datetime.now().strftime("%Y/%m/%d %H:%M:%S")}'
+    info_cell.value = f'團購期間：{time_range}　　匯出時間：{now().strftime("%Y/%m/%d %H:%M:%S")}'
     info_cell.font = Font(size=10, color='666666')
     info_cell.alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[2].height = 24
