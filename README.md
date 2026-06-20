@@ -143,6 +143,7 @@ Zeabur 正式環境至少要設定：
 ```text
 SECRET_KEY=<隨機長字串>
 ADMIN_ENTRY_PASSWORD=<後台入口密碼>
+DATABASE_URL=sqlite:////app/db/drink_pool.db
 ```
 
 若要保留 SQLite 資料與上傳照片，需掛載 Zeabur Volume：
@@ -152,7 +153,36 @@ ADMIN_ENTRY_PASSWORD=<後台入口密碼>
 /app/static/uploads/photos
 ```
 
+`DATABASE_URL` 必須指到 `/app/db` Volume 內的 SQLite 檔案；`sqlite:////app/db/drink_pool.db` 中的四個 `/` 代表使用容器絕對路徑。
+
 PaddleOCR 與 OpenRouter 都是選用功能；Zeabur 預設只安裝主流程需要的輕量相依套件，不影響一般團購、菜單照片、手動品項、下單與匯出流程。完整部署步驟、環境變數、Volume 與驗收清單請看 [doc/setup_zeabur.md](doc/setup_zeabur.md)。
+
+## 圖片 Housekeeping
+
+管理員登入後，可在後台首頁點選「清理圖片」立即執行 housekeeping。此按鈕會直接執行實際清檔，不會等待 Zeabur worker 的排程時間。
+
+可用 CLI 清理上傳菜單照片：
+
+```powershell
+python cleanup_uploads.py --dry-run
+python cleanup_uploads.py --yes
+```
+
+Windows 本機可直接雙擊或執行：
+
+```powershell
+.\run_housekeeping.bat
+```
+
+批次檔會先執行 dry-run 預覽，確認輸入 `yes` 後才會實際刪除。
+
+預設會刪除 DB 未引用且超過 24 小時的孤兒圖片，並清除已結束超過 90 天場次的照片。Zeabur 上優先使用 cleanup worker service 定期執行；worker 設定 `UPLOAD_CLEANUP_RUN_AT=03:30` 後會等待到下一個 03:30 再執行清檔。若 worker 無法共享 web service 的 `/app/db` 與 `/app/static/uploads/photos` Volume，請改用 web service 的 Command Execution 手動執行。詳細設定請看 [doc/setup_zeabur.md](doc/setup_zeabur.md#5-圖片-housekeeping)。
+
+執行方式差異：
+
+- 後台「清理圖片」：登入後立即清檔。
+- `run_housekeeping.bat`：本機先 dry-run，確認後立即清檔。
+- `cleanup_worker.py`：Zeabur 長駐 worker 依 `UPLOAD_CLEANUP_RUN_AT` 或 interval 定期清檔。
 
 ## 功能
 
@@ -183,12 +213,16 @@ drink-pool/
 ├── utils.py                       # Excel 匯出等輔助邏輯
 ├── ocr.py                         # 菜單 OCR 與品項解析
 ├── ai_menu.py                     # OpenRouter AI 菜單修正服務
+├── housekeeping.py                # 上傳圖片清檔核心邏輯
+├── cleanup_uploads.py             # 手動或排程執行的圖片清檔 CLI
+├── cleanup_worker.py              # Zeabur cleanup worker 入口
 ├── setup_db.py                    # 初始化資料庫
 ├── rebuild_db.py                  # 清除並重建資料庫
 ├── requirements.txt               # Python 主流程相依套件
 ├── requirements-ocr.txt           # PaddleOCR 選用相依套件
 ├── zbpack.json                    # Zeabur 啟動設定
 ├── start.bat                      # Windows 本機快速啟動
+├── run_housekeeping.bat           # Windows 本機一鍵執行圖片清檔
 ├── restore_db.bat                 # Windows 本機還原空白資料庫
 ├── db/
 │   ├── drink_pool.db              # 本機資料庫，忽略不提交

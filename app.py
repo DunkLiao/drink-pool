@@ -16,6 +16,7 @@ from config import Config, env_flag
 from models import db, User, Department, AiMenuDraft, MenuItem, Session, Order, OrderAddon, SystemSetting, now
 from forms import LoginForm, AdminEntryPasswordForm, RegisterForm, SessionForm, DepartmentForm, MenuItemForm, OrderForm, SettingsForm
 from ai_menu import DEFAULT_OPENROUTER_MODEL, OpenRouterMenuCorrectionClient
+from housekeeping import cleanup_uploaded_photos
 from ocr import extract_menu_items_from_image, normalize_menu_name
 from utils import export_orders_to_excel
 
@@ -72,6 +73,18 @@ def friendly_ai_error(exc):
     if 'OpenRouter' in message or 'timed out' in message or 'timeout' in message.lower():
         return 'OpenRouter 回應異常，請稍後重試。'
     return 'AI 修正 OCR 失敗，請稍後重試或改用手動修正。'
+
+
+def housekeeping_flash_message(result):
+    return (
+        '圖片清理完成：'
+        f'掃描 {result.scanned_files} 個檔案，'
+        f'孤兒 {len(result.orphan_files)} 個，'
+        f'過期引用 {len(result.expired_referenced_files)} 個，'
+        f'清空引用 {result.cleared_photo_references} 筆，'
+        f'missing {len(result.missing_referenced_files)} 個，'
+        f'失敗 {len(result.failed_files)} 個。'
+    )
 
 
 def generate_ai_menu_draft(app, session_obj, candidates=None):
@@ -461,6 +474,19 @@ def create_app():
     def admin_dashboard():
         sessions = Session.query.order_by(Session.created_at.desc()).all()
         return render_template('admin/dashboard.html', sessions=sessions, now=now())
+
+    @app.route('/admin/housekeeping', methods=['POST'])
+    @admin_required
+    def admin_housekeeping():
+        result = cleanup_uploaded_photos(
+            app,
+            dry_run=False,
+            retention_days=90,
+            orphan_grace_hours=24,
+        )
+        category = 'warning' if result.failed_files else 'success'
+        flash(housekeeping_flash_message(result), category)
+        return redirect(url_for('admin_dashboard'))
 
     # -------------------- Admin: Sessions --------------------
     @app.route('/admin/session/new', methods=['GET', 'POST'])
