@@ -157,6 +157,11 @@ DATABASE_URL=sqlite:////app/db/drink_pool.db
 
 PaddleOCR 與 OpenRouter 都是選用功能；Zeabur 預設只安裝主流程需要的輕量相依套件，不影響一般團購、菜單照片、手動品項、下單與匯出流程。完整部署步驟、環境變數、Volume 與驗收清單請看 [doc/setup_zeabur.md](doc/setup_zeabur.md)。
 
+## 文件
+
+- [Zeabur 部署設定](doc/setup_zeabur.md)：正式環境部署、環境變數、Volume 與驗收清單。
+- [使用者操作手冊](doc/飲料團購系統_使用者操作手冊.docx)：管理員與一般使用者的操作流程說明。
+
 ## 圖片 Housekeeping
 
 管理員登入後，可在後台首頁點選「清理圖片」立即執行 housekeeping。此按鈕會直接執行實際清檔，不會等待 Zeabur worker 的排程時間。
@@ -224,6 +229,9 @@ drink-pool/
 ├── start.bat                      # Windows 本機快速啟動
 ├── run_housekeeping.bat           # Windows 本機一鍵執行圖片清檔
 ├── restore_db.bat                 # Windows 本機還原空白資料庫
+├── doc/
+│   ├── setup_zeabur.md            # Zeabur 部署設定與驗收清單
+│   └── 飲料團購系統_使用者操作手冊.docx # 使用者操作手冊
 ├── db/
 │   ├── drink_pool.db              # 本機資料庫，忽略不提交
 │   └── drink_pool_blank.db        # 空白備份資料庫，忽略不提交
