@@ -103,9 +103,9 @@ CREATE TABLE system_settings (
 
 INSERT INTO system_settings (key, value) VALUES
     ('site_title', '飲料團購系統'),
-    ('site_subtitle', '臺灣銀行 風險管理部 飲料團購系統'),
-    ('org_name', '臺灣銀行'),
-    ('org_dept', '風險管理部');
+    ('site_subtitle', '測試公司 測試一部 飲料團購系統'),
+    ('org_name', '測試公司'),
+    ('org_dept', '測試一部');
 """)
 conn.commit()
 conn.close()

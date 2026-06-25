@@ -68,7 +68,7 @@ class Config:
     # Default site settings (can be overridden via admin panel)
     DEFAULT_SETTINGS = {
         'site_title': '飲料團購系統',
-        'site_subtitle': '臺灣銀行 風險管理部 飲料團購系統',
-        'org_name': '臺灣銀行',
-        'org_dept': '風險管理部',
+        'site_subtitle': '測試公司 測試一部 飲料團購系統',
+        'org_name': '測試公司',
+        'org_dept': '測試一部',
     }
